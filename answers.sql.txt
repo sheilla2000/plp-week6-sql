@@ -1,0 +1,74 @@
+-- PLP Week 5 - Hands-On Lab: Backups, PITR, and Replication
+-- Student: sheilla2000
+
+-- ==============================
+-- Step 1: Take and Verify a Logical Backup
+-- ==============================
+-- Backup the inventory database
+pg_dump -U postgres -d inventory -F c -f /var/backups/inventory_backup.dump
+
+-- Verify backup file exists and is not empty
+ls -lh /var/backups/inventory_backup.dump
+
+-- Create test db and restore to verify it works
+createdb -U postgres inventory_restore_test
+pg_restore -U postgres -d inventory_restore_test /var/backups/inventory_backup.dump
+
+-- Check tables restored
+-- psql -U postgres -d inventory_restore_test -c "\dt"
+
+-- ==============================
+-- Step 2: Enable WAL Archiving
+-- ==============================
+-- In postgresql.conf:
+-- wal_level = replica
+-- archive_mode = on
+-- archive_command = 'test ! -f /var/lib/postgresql/wal_archive/%f && cp %p /var/lib/postgresql/wal_archive/%f'
+-- max_wal_senders = 3
+
+-- Create archive directory
+-- mkdir -p /var/lib/postgresql/wal_archive
+-- chown postgres:postgres /var/lib/postgresql/wal_archive
+
+-- Reload config
+-- SELECT pg_reload_conf();
+
+-- Take a base backup for PITR
+-- pg_basebackup -U postgres -D /var/lib/postgresql/base_backup -Ft -z -P -X fetch
+
+-- ==============================
+-- Step 3: Point In Time Recovery (PITR)
+-- ==============================
+-- 1. Simulate failure: note current time
+-- SELECT now();
+
+-- 2. To recover, stop postgres, restore base backup and configure recovery
+-- recovery_target_time = '2026-10-15 14:00:00'
+-- restore_command = 'cp /var/lib/postgresql/wal_archive/%f %p'
+
+-- 3. Start postgres and verify data is back to that time
+
+-- ==============================
+-- Step 4: Streaming Replication
+-- ==============================
+-- On Primary - create replication user
+-- CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'replicator_pass';
+
+-- In pg_hba.conf allow replication
+-- host replication replicator <standby_ip>/32 md5
+
+-- On Standby - clone primary
+-- pg_basebackup -h <primary_ip> -U replicator -D /var/lib/postgresql/standby -P -R
+
+-- On Standby - start and check
+-- SELECT * FROM pg_stat_replication; -- on primary
+-- SELECT pg_is_in_recovery(); -- on standby should be true
+
+-- ==============================
+-- Key Answers for Trustworthiness
+-- ==============================
+-- Q: Most important practice for trustworthy backups?
+-- A: Regularly test restoring them
+
+-- Q: RPO and RTO?
+-- A: RPO = how much data you can afford to lose; RTO = how long you can afford to be down
